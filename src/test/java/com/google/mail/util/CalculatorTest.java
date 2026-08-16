@@ -5,7 +5,7 @@ import org.junit.jupiter.api.*;
 public class CalculatorTest {
 
     @BeforeAll
-    void initAll(){
+    static void initAll() {
 
     }
 
@@ -16,7 +16,7 @@ public class CalculatorTest {
 //    @AfterAll
 
     @Test
-    void test_add(){
+    void test_add() {
 
     }
 }
