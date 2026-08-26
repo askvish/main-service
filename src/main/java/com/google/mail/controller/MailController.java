@@ -26,7 +26,7 @@ public class MailController {
 
     @GetMapping("/ping")
     public String ping() {
-        logger.info("[PING] Health check endpoint called");
+        logger.info("[PING] Health check endpoint called!");
         String response = "Mail service is running! Trigger by Github Webhook";
         logger.debug("[PING] Response: {}", response);
         return response;
