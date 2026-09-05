@@ -6,6 +6,9 @@ on:
       - dev
   pull_request:
 
+env:
+  APP_NAME: main-service
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -14,16 +17,72 @@ jobs:
       contents: read
 
     steps:
-      - name: Say hello
-        run: echo "Hello from GitHub Actions!"
-
-      - name: Show repository
+      - name: Show working directory
+        run: pwd # /home/runner/work/main-service/main-service
+      - name: Show environment variables
+        run: env
+      - name: Show all contexts
         run: |
+          echo "All Contexts:"
+          echo "${{ toJson(github) }}"
+          echo "${{ toJson(github.event) }}"
+          echo "${{ toJson(github.workflow) }}"
+          echo "${{ toJson(github.job) }}"
+          echo "${{ toJson(github.runner) }}"
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Show files in the repository
+        run: ls -la
+      - name: Show all information
+        run: |
+          echo "Application Name: $APP_NAME"
+          echo "Repository Owner: $GITHUB_REPOSITORY_OWNER"
           echo "Repository: $GITHUB_REPOSITORY"
           echo "Branch: $GITHUB_REF_NAME"
-
-      - name: Show working directory
-        run: pwd
-
-      - name: List files
-        run: ls -al
+          echo "Current Branch: $(git branch --show-current)"
+          echo "Commit Hash: $(git rev-parse HEAD)"
+          echo "Commit Message: $(git log -1 --pretty=%B)"
+          echo "Commit Author: $(git log -1 --pretty=%an)"
+          echo "Commit Date: $(git log -1 --pretty=%ad)"
+          echo "Changed Files:" $(git diff-tree --no-commit-id --name-only -r HEAD)
+          echo "Commit Changes:" $(git show --stat HEAD)
+          echo "Commit Diff:" $(git show --pretty="" --name-only HEAD)
+      - name: Setup Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+      - name: Build with Maven
+        run: mvn clean install
+      - name: Run tests with Maven
+        run: mvn test
+      - name: Show test results
+        run: |
+          echo "Test Results:"
+          if [ -f target/surefire-reports/TEST-*.xml ]; then
+            cat target/surefire-reports/TEST-*.xml
+          else
+            echo "No test results found."
+      - name: Show test summary
+        run: |
+          echo "Test Summary:"
+          if [ -f target/surefire-reports/TEST-*.xml ]; then
+            grep -E "<testsuite|<testcase" target/surefire-reports/TEST-*.xml
+          else
+            echo "No test summary found."
+      - name: Show test failures
+        run: |
+          echo "Test Failures:"
+          if [ -f target/surefire-reports/TEST-*.xml ]; then
+            grep -E "<failure|<error" target/surefire-reports/TEST-*.xml
+          else
+            echo "No test failures found."
+      - name: Echo Secret Environment Variables
+        run: |
+          echo "Secret Environment Variables:"
+          echo "GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}"
+          echo "MY_SECRET: ${{ secrets.MY_SECRET }}"
+        env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            MY_SECRET: ${{ secrets.MY_SECRET }} # Store sensitive information under your repository's Settings → Secrets and variables → Actions.
+            API_KEY: ${{ secrets.API_KEY }} # Never hardcode passwords or API keys in workflows.
