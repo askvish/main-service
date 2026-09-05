@@ -36,25 +36,47 @@ jobs:
         run: mvn clean install
 
       - name: Start Spring Boot application
+        shell: bash
         run: |
-          nohup java -jar target/*.jar > application.log 2>&1 &
+          echo "Starting Spring Boot application..."
 
-      - name: Wait for application to start
+          nohup java -jar target/main-service-1.0.0.jar \
+            --server.address=0.0.0.0 \
+            --server.port=8080 \
+            > application.log 2>&1 &
+
+          echo $! > application.pid
+
+          echo "Application PID: $(cat application.pid)"
+
+      - name: Wait for Spring Boot application
+        shell: bash
         run: |
-          echo "Waiting for application..."
+          echo "Waiting for application to start..."
 
-          for i in {1..30}; do
-            if curl -sf https://localhost:9000/actuator/health > /dev/null; then
+          for i in {1..60}; do
+            if curl -s https  ://localhost:8080/actuator/health > /dev/null; then
               echo "Application is ready!"
               exit 0
             fi
 
-            echo "Waiting... ($i/30)"
+            if ! kill -0 "$(cat application.pid)" 2>/dev/null; then
+              echo "Application process has stopped!"
+              echo "===== APPLICATION LOG ====="
+              cat application.log
+              echo "============================"
+              exit 1
+            fi
+
+            echo "Waiting... ($i/60)"
             sleep 2
           done
 
-          echo "Application failed to start."
+          echo "Application failed to start within 120 seconds."
+          echo "===== APPLICATION LOG ====="
           cat application.log
+          echo "============================"
+
           exit 1
 
       - name: Hit application endpoint
