@@ -35,17 +35,31 @@ jobs:
       - name: Build and test with Maven
         run: mvn clean install
 
-      - name: Show test summary
-        if: always()
-        shell: bash
+      - name: Start Spring Boot application
         run: |
-          echo "Test Summary:"
-          
-          if compgen -G "target/surefire-reports/TEST-*.xml" > /dev/null; then
-            grep -E "<testsuite|<testcase" target/surefire-reports/TEST-*.xml || true
-          else
-            echo "No test summary found."
-          fi
+          nohup java -jar target/*.jar > application.log 2>&1 &
+
+      - name: Wait for application to start
+        run: |
+          echo "Waiting for application..."
+
+          for i in {1..30}; do
+            if curl -sf http://localhost:8080/actuator/health > /dev/null; then
+              echo "Application is ready!"
+              exit 0
+            fi
+
+            echo "Waiting... ($i/30)"
+            sleep 2
+          done
+
+          echo "Application failed to start."
+          cat application.log
+          exit 1
+
+      - name: Hit application endpoint
+        run: |
+          curl -v https://localhost:9000/jackson/status-codes
 
       - name: Show secret availability
         run: |
