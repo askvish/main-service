@@ -23,10 +23,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
 import java.util.Collections;
 import java.util.List;
 
-@Service
+//@Service
 public class GMailService {
 
     private static final String APPLICATION_NAME =
@@ -82,43 +83,60 @@ public class GMailService {
 
     private final GoogleAuthorizationCodeFlow flow;
 
-    public GMailService() throws Exception {
-
-        this.transport =
-                GoogleNetHttpTransport.newTrustedTransport();
-
-        GoogleClientSecrets clientSecrets =
-                loadClientSecrets();
-
-        File tokenDirectory =
-                new File(TOKENS_DIRECTORY);
-
-        if (!tokenDirectory.exists()) {
-
-            if (!tokenDirectory.mkdirs()) {
-
-                throw new IOException(
-                        "Unable to create token directory: "
-                                + tokenDirectory.getAbsolutePath()
-                );
-            }
-        }
-
-        this.flow =
-                new GoogleAuthorizationCodeFlow.Builder(
+    public GMailService() throws GeneralSecurityException, IOException {
+        this.transport = GoogleNetHttpTransport.newTrustedTransport();
+        this.flow = new GoogleAuthorizationCodeFlow.Builder(
                         transport,
                         JSON_FACTORY,
-                        clientSecrets,
+                        new GoogleClientSecrets(),
                         SCOPES
                 )
                         .setDataStoreFactory(
                                 new FileDataStoreFactory(
-                                        tokenDirectory
+                                        new File("")
                                 )
                         )
                         .setAccessType("offline")
                         .build();
     }
+
+//    public GMailService() throws Exception {
+//
+//        this.transport =
+//                GoogleNetHttpTransport.newTrustedTransport();
+//
+//        GoogleClientSecrets clientSecrets =
+//                loadClientSecrets();
+//
+//        File tokenDirectory =
+//                new File(TOKENS_DIRECTORY);
+//
+//        if (!tokenDirectory.exists()) {
+//
+//            if (!tokenDirectory.mkdirs()) {
+//
+//                throw new IOException(
+//                        "Unable to create token directory: "
+//                                + tokenDirectory.getAbsolutePath()
+//                );
+//            }
+//        }
+//
+//        this.flow =
+//                new GoogleAuthorizationCodeFlow.Builder(
+//                        transport,
+//                        JSON_FACTORY,
+//                        clientSecrets,
+//                        SCOPES
+//                )
+//                        .setDataStoreFactory(
+//                                new FileDataStoreFactory(
+//                                        tokenDirectory
+//                                )
+//                        )
+//                        .setAccessType("offline")
+//                        .build();
+//    }
 
     /**
      * Load credentials.json from:
