@@ -17,46 +17,50 @@ jobs:
       contents: read
 
     steps:
-      - name: Show working directory
-        run: pwd # /home/runner/work/main-service/main-service
-      - name: Show environment variables
-        run: env
-      - name: Show all contexts
-        run: |
-          echo "All Contexts:"
-          echo "${{ toJson(github) }}"
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Show working directory
+        run: pwd
+
       - name: Show files in the repository
         run: ls -la
+
       - name: Show all information
         run: |
           echo "Application Name: $APP_NAME"
           echo "Repository Owner: $GITHUB_REPOSITORY_OWNER"
           echo "Repository: $GITHUB_REPOSITORY"
           echo "Branch: $GITHUB_REF_NAME"
+
       - name: Setup Java 25
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '25'
-      - name: Build with Maven
+          cache: maven
+
+      - name: Verify Java and Maven
+        run: |
+          java -version
+          mvn -version
+
+      - name: Build and test with Maven
         run: mvn clean install
-      - name: Run tests with Maven
-        run: mvn test
+
       - name: Show test summary
+        if: always()
+        shell: bash
         run: |
           echo "Test Summary:"
-          if [ -f target/surefire-reports/TEST-*.xml ]; then
-            grep -E "<testsuite|<testcase" target/surefire-reports/TEST-*.xml
+          
+          if compgen -G "target/surefire-reports/TEST-*.xml" > /dev/null; then
+            grep -E "<testsuite|<testcase" target/surefire-reports/TEST-*.xml || true
           else
             echo "No test summary found."
-      - name: Echo Secret Environment Variables
+          fi
+
+      - name: Show secret availability
         run: |
-          echo "Secret Environment Variables:"
-          echo "GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}"
-          echo "MY_SECRET: ${{ secrets.MY_SECRET }}"
-        env:
-            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-            MY_SECRET: ${{ secrets.MY_SECRET }} # Store sensitive information under your repository's Settings → Secrets and variables → Actions.
-            API_KEY: ${{ secrets.API_KEY }} # Never hardcode passwords or API keys in workflows.
+          echo "MY_SECRET is configured: ${{ secrets.MY_SECRET != '' }}"
+          echo "API_KEY is configured: ${{ secrets.API_KEY != '' }}"
