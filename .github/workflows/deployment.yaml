@@ -44,7 +44,7 @@ jobs:
           echo "Waiting for application..."
 
           for i in {1..30}; do
-            if curl -sf http://localhost:8080/actuator/health > /dev/null; then
+            if curl -sf https://localhost:9000/actuator/health > /dev/null; then
               echo "Application is ready!"
               exit 0
             fi
