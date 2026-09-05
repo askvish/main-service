@@ -40,10 +40,7 @@ jobs:
         run: |
           echo "Starting Spring Boot application..."
 
-          nohup java -jar target/main-service-1.0.0.jar \
-            --server.address=0.0.0.0 \
-            --server.port=8080 \
-            > application.log 2>&1 &
+          nohup java -jar target/*.jar --server.address=0.0.0.0 > application.log 2>&1 &
 
           echo $! > application.pid
 
@@ -55,7 +52,7 @@ jobs:
           echo "Waiting for application to start..."
 
           for i in {1..60}; do
-            if curl -s https  ://localhost:8080/actuator/health > /dev/null; then
+            if curl -s http://localhost:9000/actuator/health > /dev/null; then
               echo "Application is ready!"
               exit 0
             fi
@@ -81,7 +78,7 @@ jobs:
 
       - name: Hit application endpoint
         run: |
-          curl -v https://localhost:9000/jackson/status-codes
+          curl -v http://localhost:9000/jackson/status-codes
 
       - name: Show secret availability
         run: |
