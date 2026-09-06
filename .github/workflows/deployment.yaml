@@ -1,84 +1,127 @@
-name: Hello Workflow
+name: Main Service Workflow
 
 on:
   push:
-    branches:
-      - dev
+      branches:
+        - dev
   pull_request:
 
 env:
   APP_NAME: main-service
+  ENV: dev
+  RUNNER: ubuntu-latest
+  JAVA_VERSION: 25
+  JAVA_DISTRIBUTION: temurin
+  MAVEN_VERSION: 3.8.1
+  LOG_FILE: application.log
+  HEALTH_CHECK_URL: http://localhost:9000/actuator/health
+  TEST_ENDPOINT: http://localhost:9000/jackson/status-codes
+  TIMEOUT: 60
+  MY_SECRET: ${{ secrets.MY_SECRET }}
+  API_KEY: ${{ secrets.API_KEY }}
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+
+  info:
+    runs-on: ${{ env.RUNNER }}
 
     permissions:
       contents: read
 
     steps:
-      - name: Checkout repository
+      - name: Show deployment information
+        run: echo "Deploying ${{ env.APP_NAME }} application to ${{ env.ENV }} environment on ${{ env.RUNNER }} runner."
+
+  checkout:
+    runs-on: ${{ env.RUNNER }}
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout ${{ env.APP_NAME }} repository
         uses: actions/checkout@v7
 
-      - name: Setup Java 25
+  setup:
+    runs-on: ${{ env.RUNNER }}
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Setup Java ${{ env.JAVA_VERSION }} and Maven ${{ env.MAVEN_VERSION }}
         uses: actions/setup-java@v6
         with:
-          distribution: temurin
-          java-version: '25'
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
           cache: maven
 
-      - name: Verify Java and Maven
+      - name: Verify Java and Maven installation
         run: |
-          java -version
-          mvn -version
+          java --version
+          mvn --version
 
+  build:
+    runs-on: ${{ env.RUNNER }}
+
+    permissions:
+      contents: read
+
+    steps:
       - name: Build and test with Maven
         run: mvn clean install
 
-      - name: Start Spring Boot application
+  deploy:
+    runs-on: ${{ env.RUNNER }}
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Deploy ${{ env.APP_NAME }} to ${{ env.ENV }} environment
         shell: bash
         run: |
-          echo "Starting Spring Boot application..."
-
-          nohup java -jar target/*.jar --server.address=0.0.0.0 > application.log 2>&1 &
+          echo "Deploying ${{ env.APP_NAME }} to ${{ env.ENV }} environment..."
+          
+          nohup java -jar target/*.jar > ${{ env.LOG_FILE }} 2>&1 &
 
           echo $! > application.pid
 
-          echo "Application PID: $(cat application.pid)"
+          echo "${{ env.APP_NAME }} Application PID: $(cat application.pid)"
 
-      - name: Wait for Spring Boot application
+      - name: Wait for ${{ env.APP_NAME }} application
         shell: bash
         run: |
-          echo "Waiting for application to start..."
+          echo "Waiting for ${{ env.APP_NAME }} application to start..."
 
-          for i in {1..60}; do
-            if curl -s http://localhost:9000/actuator/health > /dev/null; then
-              echo "Application is ready!"
+          for i in {1..${{ env.TIMEOUT }}}; do
+            if curl -s ${{ env.HEALTH_CHECK_URL }} > /dev/null; then
+              echo "${{ env.APP_NAME }} application is ready!"
               exit 0
             fi
 
             if ! kill -0 "$(cat application.pid)" 2>/dev/null; then
-              echo "Application process has stopped!"
+              echo "${{ env.APP_NAME }} application process has stopped!"
               echo "===== APPLICATION LOG ====="
-              cat application.log
+              cat ${{ env.LOG_FILE }}
               echo "============================"
               exit 1
             fi
 
-            echo "Waiting... ($i/60)"
+            echo "Waiting... ($i/${{ env.TIMEOUT }})"
             sleep 2
           done
 
-          echo "Application failed to start within 120 seconds."
+          echo "${{ env.APP_NAME }} application failed to start within ${{ env.TIMEOUT }} seconds."
           echo "===== APPLICATION LOG ====="
-          cat application.log
+          cat ${{ env.LOG_FILE }}
           echo "============================"
 
           exit 1
 
-      - name: Hit application endpoint
+      - name: Hit ${{ env.APP_NAME }} endpoint
         run: |
-          curl -v http://localhost:9000/jackson/status-codes
+          curl -v ${{ env.TEST_ENDPOINT }}
 
       - name: Show secret availability
         run: |
