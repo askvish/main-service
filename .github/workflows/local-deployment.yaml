@@ -11,7 +11,6 @@ env:
   ENV: local
   JAVA_VERSION: 25
   JAVA_DISTRIBUTION: temurin
-  LOG_FILE: application.log
   PID_FILE: application.pid
   HEALTH_CHECK_URL: http://localhost:9000/actuator/health
   TEST_ENDPOINT: http://localhost:9000/jackson/status-codes
@@ -109,18 +108,25 @@ jobs:
         shell: powershell
         run: |
           Write-Host "Waiting for $env:APP_NAME application to start..."
-          
+
           $started = $false
-          
-          for ($i = 1; $i -le $env:TIMEOUT; $i++) {
-          
+
+          # TIMEOUT is in seconds
+          $interval = 2
+          $maxAttempts = [math]::Ceiling(
+            [int]$env:TIMEOUT / $interval
+          )
+
+          for ($i = 1; $i -le $maxAttempts; $i++) {
+
+            # Check health endpoint
             try {
               $response = Invoke-WebRequest `
                 -Uri $env:HEALTH_CHECK_URL `
                 -UseBasicParsing `
                 -TimeoutSec 2 `
                 -ErrorAction Stop
-          
+
               if ($response.StatusCode -eq 200) {
                 Write-Host "$env:APP_NAME application is ready!"
                 $started = $true
@@ -128,46 +134,61 @@ jobs:
               }
             }
             catch {
-              # Application is not ready yet
+              # Application isn't ready yet
             }
-          
-            # Check whether the Java process is still running
+
+            # Check whether Java process is still running
             if (Test-Path $env:PID_FILE) {
-              $pid = Get-Content $env:PID_FILE
-          
-              if ($pid) {
-                $process = Get-Process -Id ([int]$pid) -ErrorAction SilentlyContinue
-          
+              $appPid = Get-Content $env:PID_FILE
+
+              if ($appPid) {
+                $process = Get-Process `
+                  -Id ([int]$appPid) `
+                  -ErrorAction SilentlyContinue
+
                 if (-not $process) {
                   Write-Host "$env:APP_NAME application process has stopped!"
-          
-                  Write-Host "===== APPLICATION LOG ====="
-          
-                  if (Test-Path $env:LOG_FILE) {
-                    Get-Content $env:LOG_FILE
+
+                  Write-Host "===== STDOUT LOG ====="
+
+                  if (Test-Path "application.stdout.log") {
+                    Get-Content "application.stdout.log"
                   }
-          
-                  Write-Host "============================"
+
+                  Write-Host "===== STDERR LOG ====="
+
+                  if (Test-Path "application.stderr.log") {
+                    Get-Content "application.stderr.log"
+                  }
+
+                  Write-Host "======================"
+
                   exit 1
                 }
               }
             }
-          
-            Write-Host "Waiting... ($i/$env:TIMEOUT)"
-            Start-Sleep -Seconds 2
+
+            Write-Host "Waiting... ($i/$maxAttempts)"
+            Start-Sleep -Seconds $interval
           }
-          
+
           if (-not $started) {
-            Write-Host "$env:APP_NAME application failed to start within $env:TIMEOUT attempts."
-          
-            Write-Host "===== APPLICATION LOG ====="
-          
-            if (Test-Path $env:LOG_FILE) {
-              Get-Content $env:LOG_FILE
+            Write-Host "$env:APP_NAME application failed to start within $env:TIMEOUT seconds."
+
+            Write-Host "===== STDOUT LOG ====="
+
+            if (Test-Path "application.stdout.log") {
+              Get-Content "application.stdout.log"
             }
-          
-            Write-Host "============================"
-          
+
+            Write-Host "===== STDERR LOG ====="
+
+            if (Test-Path "application.stderr.log") {
+              Get-Content "application.stderr.log"
+            }
+
+            Write-Host "======================"
+
             exit 1
           }
 
