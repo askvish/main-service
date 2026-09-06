@@ -1,10 +1,7 @@
-name: Local Deployment on Ashok HP PC
+name: Deploy on Ashok HP PC
 
 on:
-  push:
-    branches:
-      - dev
-  pull_request:
+  workflow_dispatch:
 
 env:
   APP_NAME: main-service

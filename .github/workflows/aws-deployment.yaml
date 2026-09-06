@@ -1,0 +1,217 @@
+name: Deploy Main Application to EC2
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - dev
+
+  pull_request:
+
+env:
+  APP_NAME: ${{ github.event.repository.name }}
+  ENV: AWS
+  JAVA_VERSION: '25'
+  JAVA_DISTRIBUTION: temurin
+
+  SOURCE_DIR: target/app.jar
+  TARGET_DIR: /home/ubuntu/${{ github.event.repository.name }}
+
+  APP_DIR: /home/ubuntu/${{ github.event.repository.name }}
+  JAR_FILE: app.jar
+  PID_FILE: application.pid
+  LOG_FILE: application.log
+
+  HEALTH_CHECK_URL: http://localhost:9000/actuator/health
+  TEST_ENDPOINT: http://localhost:9000/jackson/status-codes
+
+  TIMEOUT: 60
+
+jobs:
+
+  build:
+    name: Build Application
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+
+      - name: Show deployment information
+        run: |
+          echo "Repository: $GITHUB_REPOSITORY"
+          echo "Branch: $GITHUB_REF_NAME"
+          echo "Environment: ${{ env.ENV }}"
+          echo "Java: ${{ env.JAVA_VERSION }}"
+
+      - name: Checkout ${{ github.event.repository.name }} repository
+        uses: actions/checkout@v7
+
+      - name: Setup Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v6
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          cache: maven
+
+      - name: Verify Java and Maven
+        run: |
+          java --version
+          ./mvnw --version
+
+      - name: Build ${{ env.APP_NAME }} with Maven
+        run: |
+          ./mvnw clean package -DskipTests
+
+          JAR=$(find target -maxdepth 1 -type f -name "*.jar" ! -name "original-*.jar" | head -n 1)
+
+          if [ -z "$JAR" ]; then
+            echo "No JAR file found in target/"
+            exit 1
+          fi
+
+          echo "Built JAR: $JAR"
+          cp "$JAR" ${{ env.SOURCE_DIR }}
+          # cp target/*.jar target/app.jar
+
+      - name: Upload JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: application-jar
+          path: ${{ env.SOURCE_DIR }}
+
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: build
+
+    # Do not deploy pull requests.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+
+    permissions:
+      contents: read
+
+    steps:
+
+      - name: Download JAR
+        uses: actions/download-artifact@v4
+        with:
+          name: application-jar
+          path: ${{ env.SOURCE_DIR }}
+
+      - name: Create application directory on EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            mkdir -p "${{ env.APP_DIR }}"
+
+      - name: Copy JAR file to EC2 via SSH and Deploy ${{ env.APP_NAME }} to ${{ env.ENV }} environment
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: ${{ env.SOURCE_DIR }}
+          target: ${{ env.APP_DIR }}
+          strip_components: 1
+          script: |
+            echo "Copied JAR file to EC2: ${{ env.APP_DIR }}/app.jar"
+
+      - name: Stop and start application on EC2
+        uses: appleboy/ssh-action@v1
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: API_KEY
+          script: |
+            set -e
+
+            APP_DIR="${{ env.APP_DIR }}"
+            JAR="$APP_DIR/${{ env.JAR_FILE }}"
+            PID_FILE="$APP_DIR/${{ env.PID_FILE }}"
+            LOG_FILE="$APP_DIR/${{ env.LOG_FILE }}"
+
+            echo "Application directory: $APP_DIR"
+            echo "JAR: $JAR"
+
+            # Stop existing application
+            if [ -f "$PID_FILE" ]; then
+              PID=$(cat "$PID_FILE")
+
+              if kill -0 "$PID" 2>/dev/null; then
+                echo "Stopping application with PID $PID..."
+                kill "$PID"
+
+                # Wait up to 30 seconds for graceful shutdown
+                for i in $(seq 1 30); do
+                  if ! kill -0 "$PID" 2>/dev/null; then
+                    break
+                  fi
+
+                  sleep 1
+                done
+
+                # Force kill if still running
+                if kill -0 "$PID" 2>/dev/null; then
+                  echo "Application did not stop gracefully. Force killing..."
+                  kill -9 "$PID"
+                fi
+              fi
+
+              rm -f "$PID_FILE"
+            fi
+
+            # Verify JAR exists
+            if [ ! -f "$JAR" ]; then
+              echo "ERROR: JAR not found: $JAR"
+              exit 1
+            fi
+
+            # Start application
+            echo "Starting application..."
+
+            nohup java -jar "$JAR" > "$LOG_FILE" 2>&1 &
+
+            NEW_PID=$!
+            echo "$NEW_PID" > "$PID_FILE"
+
+            echo "${{ env.APP_NAME }} Application started with PID: $NEW_PID"
+
+            # Give Java a moment to start
+            sleep 5
+
+            if ! kill -0 "$NEW_PID" 2>/dev/null; then
+              echo "ERROR: Application failed to start."
+              echo "===== APPLICATION LOG ====="
+              tail -100 "$LOG_FILE"
+              echo "==========================="
+              rm -f "$PID_FILE"
+              exit 1
+            fi
+
+            echo "${{ env.APP_NAME }} Application started successfully."
+
+
+      - name: Hit ${{ env.APP_NAME }} endpoint
+        run: |
+          echo "Hitting ${{ env.TEST_ENDPOINT }} endpoint..."
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.TEST_ENDPOINT }}")
+          echo "Response code: $RESPONSE"
+
+          if [ "$RESPONSE" -ne 200 ]; then
+            echo "ERROR: Endpoint returned non-200 response."
+            exit 1
+          fi
+
+
+      - name: Show secret availability
+        run: |
+          echo "API_KEY is configured: ${{ secrets.API_KEY != '' }}"
+          echo "MY_SECRET is configured: ${{ secrets.MY_SECRET != '' }}"
