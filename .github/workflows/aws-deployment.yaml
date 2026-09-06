@@ -72,6 +72,8 @@ jobs:
             echo "No JAR file found in target/"
             exit 1
           fi
+          
+          ls -lah
 
           echo "Built JAR: $JAR"
           cp "$JAR" ${{ env.SOURCE_DIR }}
@@ -86,6 +88,7 @@ jobs:
   deploy:
     name: Deploy to EC2
     runs-on: ubuntu-latest
+    environment: AWS
     needs: build
 
     # Do not deploy pull requests.
@@ -95,12 +98,51 @@ jobs:
       contents: read
 
     steps:
+      - name: Check directory structure before downloading artifact
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Contents:"
+          ls -lah
 
       - name: Download JAR
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: application-jar
           path: ${{ env.SOURCE_DIR }}
+
+      - name: Check downloaded JAR
+        run: |
+          echo "Contents of ${{ env.SOURCE_DIR }}:"
+          ls -lah ${{ env.SOURCE_DIR }}
+          file ${{ env.SOURCE_DIR }}/app.jar
+          test -f ${{ env.SOURCE_DIR }}/app.jar
+
+      - name: Check EC2 host
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          if [ -z "$EC2_HOST" ]; then
+            echo "EC2_HOST is EMPTY"
+            exit 1
+          else
+            echo "EC2_HOST is configured"
+          fi
+          
+            if [ -z "$EC2_USERNAME" ]; then
+                echo "EC2_USERNAME is EMPTY"
+                exit 1
+            else
+                echo "EC2_USERNAME is configured"
+            fi
+          
+            if [ -z "$EC2_SSH_KEY" ]; then
+                echo "EC2_SSH_KEY is EMPTY"
+                exit 1
+            else
+                echo "EC2_SSH_KEY is configured"
+            fi
 
       - name: Create application directory on EC2
         uses: appleboy/ssh-action@v1
@@ -109,6 +151,8 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            pwd
+            ls -lah
             mkdir -p "${{ env.APP_DIR }}"
 
       - name: Copy JAR file to EC2 via SSH and Deploy ${{ env.APP_NAME }} to ${{ env.ENV }} environment
