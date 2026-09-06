@@ -12,6 +12,7 @@ env:
   JAVA_VERSION: 25
   JAVA_DISTRIBUTION: temurin
   LOG_FILE: application.log
+  PID_FILE: application.pid
   HEALTH_CHECK_URL: http://localhost:9000/actuator/health
   TEST_ENDPOINT: http://localhost:9000/jackson/status-codes
   TIMEOUT: 60
@@ -26,6 +27,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Verify Java and Maven installation
+        shell: powershell
         run: |
           java --version
           mvn --version
@@ -33,49 +35,144 @@ jobs:
           where.exe mvn
 
       - name: Build and test with Maven
-        run: mvn clean install
+        shell: powershell
+        run: |
+          mvn clean install
 
       - name: Deploy ${{ env.APP_NAME }} to ${{ env.ENV }} environment
-        shell: cmd
+        shell: powershell
         run: |
-          echo "Deploying ${{ env.APP_NAME }} to ${{ env.ENV }} environment..."
-
-          nohup java -jar target/*.jar > "${{ env.LOG_FILE }}" 2>&1 &
-
-          echo $! > application.pid
-
-          echo "${{ env.APP_NAME }} Application PID: $(cat application.pid)"
+          Write-Host "Deploying $env:APP_NAME to $env:ENV environment..."
+          
+          # Find the generated JAR
+          $jar = Get-ChildItem "target\*.jar" |
+            Where-Object { $_.Name -notmatch '(-sources|-javadoc|-original)\.jar$' } |
+            Select-Object -First 1
+          
+          if (-not $jar) {
+            Write-Error "No application JAR found in target directory."
+            exit 1
+          }
+          
+          Write-Host "Starting JAR: $($jar.FullName)"
+          
+          # Stop an existing application if application.pid exists
+          if (Test-Path $env:PID_FILE) {
+            $oldPid = Get-Content $env:PID_FILE
+          
+            if ($oldPid) {
+              Write-Host "Stopping existing application with PID $oldPid..."
+          
+              try {
+                Stop-Process -Id ([int]$oldPid) -Force -ErrorAction SilentlyContinue
+              } catch {
+                Write-Host "Existing process is not running."
+              }
+            }
+          
+            Remove-Item $env:PID_FILE -Force -ErrorAction SilentlyContinue
+          }
+          
+          # Remove old log
+          if (Test-Path $env:LOG_FILE) {
+            Remove-Item $env:LOG_FILE -Force
+          }
+          
+          # Start application in the background
+          $process = Start-Process `
+            -FilePath "java" `
+            -ArgumentList "-jar `"$($jar.FullName)`"" `
+            -RedirectStandardOutput $env:LOG_FILE `
+            -RedirectStandardError $env:LOG_FILE `
+            -PassThru `
+            -WindowStyle Hidden
+          
+          # Save PID
+          $process.Id | Out-File -FilePath $env:PID_FILE -Encoding ascii
+          
+          Write-Host "$env:APP_NAME Application PID: $($process.Id)"
 
       - name: Wait for ${{ env.APP_NAME }} application
-        shell: cmd
+        shell: powershell
         run: |
-          echo "Waiting for ${{ env.APP_NAME }} application to start..."
-
-          for i in $(seq 1 ${{ env.TIMEOUT }}); do
-            if curl -s "${{ env.HEALTH_CHECK_URL }}" > /dev/null; then
-              echo "${{ env.APP_NAME }} application is ready!"
-              exit 0
-            fi
-
-            if ! kill -0 "$(cat application.pid)" 2>/dev/null; then
-              echo "${{ env.APP_NAME }} application process has stopped!"
-              echo "===== APPLICATION LOG ====="
-              cat "${{ env.LOG_FILE }}"
-              echo "============================"
-              exit 1
-            fi
-
-            echo "Waiting... ($i/${{ env.TIMEOUT }})"
-            sleep 2
-          done
-
-          echo "${{ env.APP_NAME }} application failed to start within ${{ env.TIMEOUT }} seconds."
-          echo "===== APPLICATION LOG ====="
-          cat "${{ env.LOG_FILE }}"
-          echo "============================"
-
-          exit 1
+          Write-Host "Waiting for $env:APP_NAME application to start..."
+          
+          $started = $false
+          
+          for ($i = 1; $i -le $env:TIMEOUT; $i++) {
+          
+            try {
+              $response = Invoke-WebRequest `
+                -Uri $env:HEALTH_CHECK_URL `
+                -UseBasicParsing `
+                -TimeoutSec 2 `
+                -ErrorAction Stop
+          
+              if ($response.StatusCode -eq 200) {
+                Write-Host "$env:APP_NAME application is ready!"
+                $started = $true
+                break
+              }
+            }
+            catch {
+              # Application is not ready yet
+            }
+          
+            # Check whether the Java process is still running
+            if (Test-Path $env:PID_FILE) {
+              $pid = Get-Content $env:PID_FILE
+          
+              if ($pid) {
+                $process = Get-Process -Id ([int]$pid) -ErrorAction SilentlyContinue
+          
+                if (-not $process) {
+                  Write-Host "$env:APP_NAME application process has stopped!"
+          
+                  Write-Host "===== APPLICATION LOG ====="
+          
+                  if (Test-Path $env:LOG_FILE) {
+                    Get-Content $env:LOG_FILE
+                  }
+          
+                  Write-Host "============================"
+                  exit 1
+                }
+              }
+            }
+          
+            Write-Host "Waiting... ($i/$env:TIMEOUT)"
+            Start-Sleep -Seconds 2
+          }
+          
+          if (-not $started) {
+            Write-Host "$env:APP_NAME application failed to start within $env:TIMEOUT attempts."
+          
+            Write-Host "===== APPLICATION LOG ====="
+          
+            if (Test-Path $env:LOG_FILE) {
+              Get-Content $env:LOG_FILE
+            }
+          
+            Write-Host "============================"
+          
+            exit 1
+          }
 
       - name: Hit ${{ env.APP_NAME }} endpoint
+        shell: powershell
         run: |
-          curl -v "${{ env.TEST_ENDPOINT }}"
+          Write-Host "Testing $env:TEST_ENDPOINT..."
+          
+          try {
+            Invoke-WebRequest `
+              -Uri $env:TEST_ENDPOINT `
+              -UseBasicParsing `
+              -TimeoutSec 10 `
+              -ErrorAction Stop
+          
+            Write-Host "Endpoint test successful!"
+          }
+          catch {
+            Write-Error "Endpoint test failed: $($_.Exception.Message)"
+            exit 1
+          }
