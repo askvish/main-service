@@ -1,4 +1,4 @@
-name: Main Service Workflow
+name: Local Deployment on Ashok HP PC
 
 on:
   push:
@@ -19,38 +19,31 @@ env:
   API_KEY: ${{ secrets.API_KEY }}
 
 jobs:
-
-  build-and-deploy:
-    runs-on: ubuntu-latest
-
-    permissions:
-      contents: read
+  deploy:
+    runs-on: self-hosted
 
     steps:
-      - name: Show deployment information
-        run: |
-          echo "Deploying ${{ env.APP_NAME }} application to ${{ env.ENV }} environment."
+      - uses: actions/checkout@v7
 
-      - name: Checkout ${{ env.APP_NAME }} repository
-        uses: actions/checkout@v7
-
-      - name: Setup Java ${{ env.JAVA_VERSION }} and Maven
+      - name: Setup Java
         uses: actions/setup-java@v6
         with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: 25
+          distribution: temurin
           cache: maven
 
       - name: Verify Java and Maven installation
         run: |
           java --version
           mvn --version
+          where.exe java
+          where.exe mvn
 
       - name: Build and test with Maven
         run: mvn clean install
 
       - name: Deploy ${{ env.APP_NAME }} to ${{ env.ENV }} environment
-        shell: bash
+        shell: cmd
         run: |
           echo "Deploying ${{ env.APP_NAME }} to ${{ env.ENV }} environment..."
 
@@ -61,7 +54,7 @@ jobs:
           echo "${{ env.APP_NAME }} Application PID: $(cat application.pid)"
 
       - name: Wait for ${{ env.APP_NAME }} application
-        shell: bash
+        shell: cmd
         run: |
           echo "Waiting for ${{ env.APP_NAME }} application to start..."
 
@@ -93,8 +86,3 @@ jobs:
       - name: Hit ${{ env.APP_NAME }} endpoint
         run: |
           curl -v "${{ env.TEST_ENDPOINT }}"
-
-      - name: Show secret availability
-        run: |
-          echo "MY_SECRET is configured: ${{ secrets.MY_SECRET != '' }}"
-          echo "API_KEY is configured: ${{ secrets.API_KEY != '' }}"
