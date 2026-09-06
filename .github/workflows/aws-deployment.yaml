@@ -58,10 +58,12 @@ jobs:
       - name: Verify Java and Maven
         run: |
           java --version
+          chmod +x mvnw
           ./mvnw --version
 
       - name: Build ${{ env.APP_NAME }} with Maven
         run: |
+          chmod +x mvnw
           ./mvnw clean package -DskipTests
 
           JAR=$(find target -maxdepth 1 -type f -name "*.jar" ! -name "original-*.jar" | head -n 1)
