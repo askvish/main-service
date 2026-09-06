@@ -8,7 +8,7 @@ on:
 
 env:
   APP_NAME: main-service
-  ENV: dev
+  ENV: local
   JAVA_VERSION: 25
   JAVA_DISTRIBUTION: temurin
   LOG_FILE: application.log
@@ -44,9 +44,11 @@ jobs:
         run: |
           Write-Host "Deploying $env:APP_NAME to $env:ENV environment..."
           
-          # Find the generated JAR
+          # Find the application JAR
           $jar = Get-ChildItem "target\*.jar" |
-            Where-Object { $_.Name -notmatch '(-sources|-javadoc|-original)\.jar$' } |
+            Where-Object {
+              $_.Name -notmatch '(-sources|-javadoc|-original)\.jar$'
+            } |
             Select-Object -First 1
           
           if (-not $jar) {
@@ -56,39 +58,50 @@ jobs:
           
           Write-Host "Starting JAR: $($jar.FullName)"
           
-          # Stop an existing application if application.pid exists
+          # Stop existing application
           if (Test-Path $env:PID_FILE) {
             $oldPid = Get-Content $env:PID_FILE
           
             if ($oldPid) {
               Write-Host "Stopping existing application with PID $oldPid..."
           
-              try {
-                Stop-Process -Id ([int]$oldPid) -Force -ErrorAction SilentlyContinue
-              } catch {
-                Write-Host "Existing process is not running."
-              }
+              Stop-Process `
+                -Id ([int]$oldPid) `
+                -Force `
+                -ErrorAction SilentlyContinue
+          
+              Start-Sleep -Seconds 2
             }
           
             Remove-Item $env:PID_FILE -Force -ErrorAction SilentlyContinue
           }
           
-          # Remove old log
-          if (Test-Path $env:LOG_FILE) {
-            Remove-Item $env:LOG_FILE -Force
-          }
+          # Log files
+          $stdoutLog = "application.stdout.log"
+          $stderrLog = "application.stderr.log"
           
-          # Start application in the background
+          # Remove old logs
+          Remove-Item $stdoutLog -Force -ErrorAction SilentlyContinue
+          Remove-Item $stderrLog -Force -ErrorAction SilentlyContinue
+          
+          # Start application
           $process = Start-Process `
             -FilePath "java" `
             -ArgumentList "-jar `"$($jar.FullName)`"" `
-            -RedirectStandardOutput $env:LOG_FILE `
-            -RedirectStandardError $env:LOG_FILE `
+            -RedirectStandardOutput $stdoutLog `
+            -RedirectStandardError $stderrLog `
             -PassThru `
             -WindowStyle Hidden
           
+          if (-not $process) {
+            Write-Error "Failed to start application."
+            exit 1
+          }
+          
           # Save PID
-          $process.Id | Out-File -FilePath $env:PID_FILE -Encoding ascii
+          $process.Id | Out-File `
+            -FilePath $env:PID_FILE `
+            -Encoding ascii
           
           Write-Host "$env:APP_NAME Application PID: $($process.Id)"
 
