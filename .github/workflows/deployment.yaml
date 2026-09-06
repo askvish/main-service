@@ -2,14 +2,13 @@ name: Main Service Workflow
 
 on:
   push:
-      branches:
-        - dev
+    branches:
+      - dev
   pull_request:
 
 env:
   APP_NAME: main-service
   ENV: dev
-  RUNNER: ubuntu-latest
   JAVA_VERSION: 25
   JAVA_DISTRIBUTION: temurin
   MAVEN_VERSION: 3.8.1
@@ -22,33 +21,20 @@ env:
 
 jobs:
 
-  info:
-    runs-on: ${{ env.RUNNER }}
+  build-and-deploy:
+    runs-on: ubuntu-latest
 
     permissions:
       contents: read
 
     steps:
       - name: Show deployment information
-        run: echo "Deploying ${{ env.APP_NAME }} application to ${{ env.ENV }} environment on ${{ env.RUNNER }} runner."
+        run: |
+          echo "Deploying ${{ env.APP_NAME }} application to ${{ env.ENV }} environment."
 
-  checkout:
-    runs-on: ${{ env.RUNNER }}
-
-    permissions:
-      contents: read
-
-    steps:
       - name: Checkout ${{ env.APP_NAME }} repository
         uses: actions/checkout@v7
 
-  setup:
-    runs-on: ${{ env.RUNNER }}
-
-    permissions:
-      contents: read
-
-    steps:
       - name: Setup Java ${{ env.JAVA_VERSION }} and Maven ${{ env.MAVEN_VERSION }}
         uses: actions/setup-java@v6
         with:
@@ -61,29 +47,15 @@ jobs:
           java --version
           mvn --version
 
-  build:
-    runs-on: ${{ env.RUNNER }}
-
-    permissions:
-      contents: read
-
-    steps:
       - name: Build and test with Maven
         run: mvn clean install
 
-  deploy:
-    runs-on: ${{ env.RUNNER }}
-
-    permissions:
-      contents: read
-
-    steps:
       - name: Deploy ${{ env.APP_NAME }} to ${{ env.ENV }} environment
         shell: bash
         run: |
           echo "Deploying ${{ env.APP_NAME }} to ${{ env.ENV }} environment..."
-          
-          nohup java -jar target/*.jar > ${{ env.LOG_FILE }} 2>&1 &
+
+          nohup java -jar target/*.jar > "${{ env.LOG_FILE }}" 2>&1 &
 
           echo $! > application.pid
 
@@ -94,8 +66,8 @@ jobs:
         run: |
           echo "Waiting for ${{ env.APP_NAME }} application to start..."
 
-          for i in {1..${{ env.TIMEOUT }}}; do
-            if curl -s ${{ env.HEALTH_CHECK_URL }} > /dev/null; then
+          for i in $(seq 1 ${{ env.TIMEOUT }}); do
+            if curl -s "${{ env.HEALTH_CHECK_URL }}" > /dev/null; then
               echo "${{ env.APP_NAME }} application is ready!"
               exit 0
             fi
@@ -103,7 +75,7 @@ jobs:
             if ! kill -0 "$(cat application.pid)" 2>/dev/null; then
               echo "${{ env.APP_NAME }} application process has stopped!"
               echo "===== APPLICATION LOG ====="
-              cat ${{ env.LOG_FILE }}
+              cat "${{ env.LOG_FILE }}"
               echo "============================"
               exit 1
             fi
@@ -114,14 +86,14 @@ jobs:
 
           echo "${{ env.APP_NAME }} application failed to start within ${{ env.TIMEOUT }} seconds."
           echo "===== APPLICATION LOG ====="
-          cat ${{ env.LOG_FILE }}
+          cat "${{ env.LOG_FILE }}"
           echo "============================"
 
           exit 1
 
       - name: Hit ${{ env.APP_NAME }} endpoint
         run: |
-          curl -v ${{ env.TEST_ENDPOINT }}
+          curl -v "${{ env.TEST_ENDPOINT }}"
 
       - name: Show secret availability
         run: |
