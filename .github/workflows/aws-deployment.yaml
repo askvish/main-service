@@ -1,4 +1,4 @@
-name: Deploy Main Application to EC2
+name: Deploy Main Application to AWS EC2
 
 on:
   workflow_dispatch:
@@ -38,17 +38,10 @@ jobs:
 
     steps:
 
-      - name: Show deployment information
-        run: |
-          echo "Repository: $GITHUB_REPOSITORY"
-          echo "Branch: $GITHUB_REF_NAME"
-          echo "Environment: ${{ env.ENV }}"
-          echo "Java: ${{ env.JAVA_VERSION }}"
-
-      - name: Checkout ${{ github.event.repository.name }} repository
+      - name: Checkout ${{ github.event.ref }} branch of ${{ github.event.repository.name }} repository
         uses: actions/checkout@v7
 
-      - name: Setup Java ${{ env.JAVA_VERSION }}
+      - name: Setup Java ${{ env.JAVA_VERSION }} (${{ env.JAVA_DISTRIBUTION }})
         uses: actions/setup-java@v6
         with:
           java-version: ${{ env.JAVA_VERSION }}
@@ -117,32 +110,23 @@ jobs:
           file ${{ env.SOURCE_DIR }}/app.jar
           test -f ${{ env.SOURCE_DIR }}/app.jar
 
-      - name: Check EC2 host
+      - name: Check EC2 configuration
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
-          if [ -z "$EC2_HOST" ]; then
-            echo "EC2_HOST is EMPTY"
-            exit 1
-          else
-            echo "EC2_HOST is configured"
+          for var in EC2_HOST EC2_USERNAME EC2_SSH_KEY; do
+          if [ -z "${!var}" ]; then
+           echo "$var is EMPTY"
+           exit 1
           fi
           
-            if [ -z "$EC2_USERNAME" ]; then
-                echo "EC2_USERNAME is EMPTY"
-                exit 1
-            else
-                echo "EC2_USERNAME is configured"
-            fi
+          echo "$var is configured"
+          done
           
-            if [ -z "$EC2_SSH_KEY" ]; then
-                echo "EC2_SSH_KEY is EMPTY"
-                exit 1
-            else
-                echo "EC2_SSH_KEY is configured"
-            fi
+#          Check SSH connection to EC2
+          ssh -o StrictHostKeyChecking=no -i "$EC2_SSH_KEY" "$EC2_USERNAME@$EC2_HOST" "echo 'SSH connection successful'"
 
       - name: Create application directory on EC2
         uses: appleboy/ssh-action@v1
@@ -154,6 +138,8 @@ jobs:
             pwd
             ls -lah
             mkdir -p "${{ env.APP_DIR }}"
+            echo "Source JAR: ${{ env.SOURCE_DIR }}"
+            echo "Target directory: ${{ env.APP_DIR }}"
 
       - name: Copy JAR file to EC2 via SSH and Deploy ${{ env.APP_NAME }} to ${{ env.ENV }} environment
         uses: appleboy/scp-action@v1
@@ -165,6 +151,10 @@ jobs:
           target: ${{ env.APP_DIR }}
           strip_components: 1
           script: |
+            pwd
+            ll
+            echo "Source JAR: ${{ env.SOURCE_DIR }}"
+            echo "Target directory: ${{ env.APP_DIR }}"
             echo "Copied JAR file to EC2: ${{ env.APP_DIR }}/app.jar"
 
       - name: Stop and start application on EC2
