@@ -85,7 +85,9 @@ jobs:
     needs: build
 
     # Do not deploy pull requests.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/dev')
 
     permissions:
       contents: read
@@ -97,36 +99,19 @@ jobs:
           echo "Contents:"
           ls -lah
 
-      - name: Download JAR
+      - name: Download JAR file
         uses: actions/download-artifact@v8
         with:
           name: application-jar
-          path: ${{ env.SOURCE_DIR }}
+          path: .
 
-      - name: Check downloaded JAR
+      - name: Verify JAR file
         run: |
-          echo "Contents of ${{ env.SOURCE_DIR }}:"
-          ls -lah ${{ env.SOURCE_DIR }}
-          file ${{ env.SOURCE_DIR }}/app.jar
-          test -f ${{ env.SOURCE_DIR }}/app.jar
-
-      - name: Check EC2 configuration
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
-          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-        run: |
-          for var in EC2_HOST EC2_USERNAME EC2_SSH_KEY; do
-          if [ -z "${!var}" ]; then
-           echo "$var is EMPTY"
-           exit 1
-          fi
-          
-          echo "$var is configured"
-          done
-          
-#          Check SSH connection to EC2
-          ssh -o StrictHostKeyChecking=no -i "$EC2_SSH_KEY" "$EC2_USERNAME@$EC2_HOST" "echo 'SSH connection successful'"
+          echo "Contents of:"
+          pwd
+          ls -lah 
+          file app.jar
+          test -f app.jar
 
       - name: Create application directory on EC2
         uses: appleboy/ssh-action@v1
@@ -138,26 +123,18 @@ jobs:
             pwd
             ls -lah
             mkdir -p "${{ env.APP_DIR }}"
-            echo "Source JAR: ${{ env.SOURCE_DIR }}"
-            echo "Target directory: ${{ env.APP_DIR }}"
 
-      - name: Copy JAR file to EC2 via SSH and Deploy ${{ env.APP_NAME }} to ${{ env.ENV }} environment
+      - name: Copy JAR file to EC2 using SCP
         uses: appleboy/scp-action@v1
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: ${{ env.SOURCE_DIR }}
+          source: app.jar
           target: ${{ env.APP_DIR }}
-          strip_components: 1
-          script: |
-            pwd
-            ll
-            echo "Source JAR: ${{ env.SOURCE_DIR }}"
-            echo "Target directory: ${{ env.APP_DIR }}"
-            echo "Copied JAR file to EC2: ${{ env.APP_DIR }}/app.jar"
+          overwrite: true
 
-      - name: Stop and start application on EC2
+      - name: Restart application on EC2 and perform health check
         uses: appleboy/ssh-action@v1
         env:
           API_KEY: ${{ secrets.API_KEY }}
@@ -233,6 +210,19 @@ jobs:
             fi
 
             echo "${{ env.APP_NAME }} Application started successfully."
+            
+            for i in $(seq 1 30); do
+              if curl -fsS http://localhost:9000/actuator/health; then
+                echo "Application is healthy."
+                exit 0
+              fi
+            
+              sleep 2
+            done
+            
+            echo "Application failed health check."
+            tail -100 "$LOG_FILE"
+            exit 1
 
 
       - name: Hit ${{ env.APP_NAME }} endpoint
