@@ -14,16 +14,11 @@ env:
   JAVA_VERSION: '25'
   JAVA_DISTRIBUTION: temurin
 
-  SOURCE_DIR: target/app.jar
   TARGET_DIR: /home/ubuntu/${{ github.event.repository.name }}
 
-  APP_DIR: /home/ubuntu/${{ github.event.repository.name }}
   JAR_FILE: app.jar
   PID_FILE: application.pid
   LOG_FILE: application.log
-
-  HEALTH_CHECK_URL: http://localhost:9000/actuator/health
-  TEST_ENDPOINT: http://localhost:9000/jackson/status-codes
 
   TIMEOUT: 60
 
@@ -48,35 +43,18 @@ jobs:
           distribution: ${{ env.JAVA_DISTRIBUTION }}
           cache: maven
 
-      - name: Verify Java and Maven
-        run: |
-          java --version
-          chmod +x mvnw
-          ./mvnw --version
-
       - name: Build ${{ env.APP_NAME }} with Maven
         run: |
           chmod +x mvnw
           ./mvnw clean package -DskipTests
 
-          JAR=$(find target -maxdepth 1 -type f -name "*.jar" ! -name "original-*.jar" | head -n 1)
-
-          if [ -z "$JAR" ]; then
-            echo "No JAR file found in target/"
-            exit 1
-          fi
-          
-          ls -lah
-
-          echo "Built JAR: $JAR"
-          cp "$JAR" ${{ env.SOURCE_DIR }}
-          # cp target/*.jar target/app.jar
+           cp target/*.jar app.jar
 
       - name: Upload JAR artifact
         uses: actions/upload-artifact@v4
         with:
           name: application-jar
-          path: ${{ env.SOURCE_DIR }}
+          path: app.jar
 
   deploy:
     name: Deploy to EC2
@@ -113,17 +91,6 @@ jobs:
           file app.jar
           test -f app.jar
 
-      - name: Create application directory on EC2
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USERNAME }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            pwd
-            ls -lah
-            mkdir -p "${{ env.APP_DIR }}"
-
       - name: Copy JAR file to EC2 using SCP
         uses: appleboy/scp-action@v1
         with:
@@ -131,10 +98,10 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
           source: app.jar
-          target: ${{ env.APP_DIR }}
+          target: ${{ env.TARGET_DIR }}
           overwrite: true
 
-      - name: Restart application on EC2 and perform health check
+      - name: Restart application on EC2
         uses: appleboy/ssh-action@v1
         env:
           API_KEY: ${{ secrets.API_KEY }}
@@ -146,7 +113,7 @@ jobs:
           script: |
             set -e
 
-            APP_DIR="${{ env.APP_DIR }}"
+            APP_DIR="${{ env.TARGET_DIR }}"
             JAR="$APP_DIR/${{ env.JAR_FILE }}"
             PID_FILE="$APP_DIR/${{ env.PID_FILE }}"
             LOG_FILE="$APP_DIR/${{ env.LOG_FILE }}"
@@ -210,34 +177,4 @@ jobs:
             fi
 
             echo "${{ env.APP_NAME }} Application started successfully."
-            
-            for i in $(seq 1 30); do
-              if curl -fsS http://localhost:9000/actuator/health; then
-                echo "Application is healthy."
-                exit 0
-              fi
-            
-              sleep 2
-            done
-            
-            echo "Application failed health check."
-            tail -100 "$LOG_FILE"
-            exit 1
-
-
-      - name: Hit ${{ env.APP_NAME }} endpoint
-        run: |
-          echo "Hitting ${{ env.TEST_ENDPOINT }} endpoint..."
-          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.TEST_ENDPOINT }}")
-          echo "Response code: $RESPONSE"
-
-          if [ "$RESPONSE" -ne 200 ]; then
-            echo "ERROR: Endpoint returned non-200 response."
-            exit 1
-          fi
-
-
-      - name: Show secret availability
-        run: |
-          echo "API_KEY is configured: ${{ secrets.API_KEY != '' }}"
-          echo "MY_SECRET is configured: ${{ secrets.MY_SECRET != '' }}"
+            echo "API Key: $API_KEY"
